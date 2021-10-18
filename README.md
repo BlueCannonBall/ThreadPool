@@ -13,7 +13,7 @@ int main() {
     std::vector<std::shared_ptr<tp::Task>> tasks; // Vector to store threadpool tasks
 
     for (unsigned int i = 0; i < 10; i++) {
-        tasks.push_back(pool.schedule([i, &mtx]() {
+        tasks.push_back(pool.schedule([i, &mtx](void*) {
             if (true) {
                 mtx.lock();
                 std::cout << "Printing from task: " << i << std::endl;

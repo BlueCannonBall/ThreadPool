@@ -28,12 +28,13 @@ namespace tp {
     public:
         CommandType type;
         CommandStatus status = CommandStatus::Running;
-        void* data; // User data
+        void* data = nullptr; // User data
 
         Command() = default;
 
-        Command(CommandType type) :
-            type(type) { }
+        Command(CommandType type, void* data = nullptr) :
+            type(type),
+            data(data) { }
 
         CommandStatus await() {
             std::unique_lock<std::mutex> lock(mutex);
@@ -49,12 +50,15 @@ namespace tp {
 
     class CommandExecute: public Command {
     public:
-        std::function<void()> func;
+        std::function<void(void*)> func;
         std::exception error;
+        void* arg = nullptr;
 
-        CommandExecute(std::function<void()> func) :
-            func(std::move(func)) {
+        CommandExecute(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr) :
+            func(std::move(func)),
+            arg(arg) {
             type = CommandType::Execute;
+            this->data = data;
         }
     };
 
@@ -87,7 +91,7 @@ namespace tp {
                     case CommandType::Execute: {
                         auto cmd = (CommandExecute*) command.get();
                         try {
-                            cmd->func();
+                            cmd->func(cmd->arg);
 
                             std::unique_lock<std::mutex> lock(cmd->mutex);
                             cmd->status = CommandStatus::Success;
@@ -137,9 +141,9 @@ namespace tp {
             }
         };
 
-        std::shared_ptr<Task> schedule(std::function<void()> func) {
+        std::shared_ptr<Task> schedule(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr) {
             CommandQueue* commands = threads[sched_counter].second;
-            auto cmd = std::make_shared<CommandExecute>(std::move(func));
+            auto cmd = std::make_shared<CommandExecute>(std::move(func), arg, data);
 
             {
                 std::unique_lock<std::mutex> lock(commands->mutex);
