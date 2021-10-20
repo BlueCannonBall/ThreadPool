@@ -78,7 +78,7 @@ namespace tp {
                 while (commands->queue.empty()) {
                     commands->condition.wait(lock);
                 }
-                std::shared_ptr<Command> command = commands->queue.front();
+                std::shared_ptr<Command> command = std::move(commands->queue.front());
                 commands->queue.pop();
                 lock.unlock();
 
@@ -130,7 +130,7 @@ namespace tp {
 
                 {
                     std::unique_lock<std::mutex> lock(thread.second->mutex);
-                    thread.second->queue.push(cmd);
+                    thread.second->queue.push(std::move(cmd));
                 }
                 thread.second->condition.notify_one();
             }
@@ -167,7 +167,7 @@ namespace tp {
 
                     {
                         std::unique_lock<std::mutex> lock(threads[sched_counter].second->mutex);
-                        threads[sched_counter].second->queue.push(cmd);
+                        threads[sched_counter].second->queue.push(std::move(cmd));
                     }
                     threads[sched_counter].second->condition.notify_one();
 
