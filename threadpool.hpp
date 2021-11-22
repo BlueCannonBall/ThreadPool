@@ -1,4 +1,5 @@
 #include <condition_variable>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -84,8 +85,7 @@ namespace tp {
 
                 switch (command->type) {
                     default: {
-                        throw "Invalid command type";
-                        break;
+                        throw std::runtime_error("Invalid command type");
                     }
 
                     case CommandType::Execute: {
