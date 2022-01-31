@@ -39,6 +39,9 @@ namespace tp {
 
         CommandStatus await() {
             std::unique_lock<std::mutex> lock(mutex);
+            if (status != CommandStatus::Running) {
+                return status;
+            }
             while (status == CommandStatus::Running) {
                 condition.wait(lock);
             }
