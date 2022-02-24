@@ -1,3 +1,6 @@
+#ifndef _THREADPOOL_HPP
+#define _THREADPOOL_HPP
+
 #include <condition_variable>
 #include <exception>
 #include <functional>
@@ -190,3 +193,5 @@ namespace tp {
         }
     };
 } // namespace tp
+
+#endif
