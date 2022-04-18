@@ -95,7 +95,7 @@ namespace tp {
 
                             std::unique_lock<std::mutex> lock(cmd->mutex);
                             cmd->status = CommandStatus::Success;
-                        } catch (std::exception& e) {
+                        } catch (const std::exception& e) {
                             std::unique_lock<std::mutex> lock(cmd->mutex);
                             cmd->status = CommandStatus::Failure;
                             cmd->error = e;
