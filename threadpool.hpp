@@ -36,9 +36,9 @@ namespace tp {
 
         Command() = default;
 
-        Command(CommandType type, void* data = nullptr) :
+        Command(CommandType type, void* data = nullptr):
             type(type),
-            data(data) { }
+            data(data) {}
 
         CommandStatus await() {
             std::unique_lock<std::mutex> lock(mutex);
@@ -55,7 +55,7 @@ namespace tp {
         std::exception error;
         void* arg = nullptr;
 
-        CommandExecute(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr) :
+        CommandExecute(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr):
             func(std::move(func)),
             arg(arg) {
             type = CommandType::Execute;
