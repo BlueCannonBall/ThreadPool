@@ -49,7 +49,7 @@ namespace tp {
         }
     };
 
-    class CommandExecute: public Command {
+    class CommandExecute : public Command {
     public:
         std::function<void(void*)> func;
         std::exception error;
