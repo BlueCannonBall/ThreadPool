@@ -7,6 +7,7 @@
 #include <memory>
 #include <mutex>
 #include <queue>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -117,7 +118,7 @@ namespace tp {
         ThreadPool(unsigned int pool_size = std::thread::hardware_concurrency()) {
             for (unsigned int i = 0; i < pool_size; ++i) {
                 auto new_queue = new CommandQueue;
-                std::thread new_thread(&ThreadPool::runner, this, new_queue);
+                std::thread new_thread(std::mem_fun(&ThreadPool::runner), this, new_queue);
                 threads.push_back({std::move(new_thread), new_queue});
             }
         };
@@ -177,7 +178,7 @@ namespace tp {
             } else {
                 for (unsigned int i = threads.size(); i < new_pool_size; ++i) {
                     auto new_queue = new CommandQueue;
-                    std::thread new_thread(&ThreadPool::runner, this, new_queue);
+                    std::thread new_thread(std::mem_fun(&ThreadPool::runner), this, new_queue);
                     threads.push_back({std::move(new_thread), new_queue});
                 }
             }
