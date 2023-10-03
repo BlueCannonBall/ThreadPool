@@ -1,191 +1,145 @@
 #ifndef _THREADPOOL_HPP
 #define _THREADPOOL_HPP
 
+#include <atomic>
 #include <condition_variable>
-#include <exception>
 #include <functional>
-#include <memory>
+#include <iostream>
 #include <mutex>
 #include <queue>
-#include <stdexcept>
 #include <thread>
-#include <utility>
 #include <vector>
 
 namespace tp {
-    enum class CommandType {
-        Quit,
-        Execute
+    enum TaskStatus {
+        TASK_STATUS_RUNNING,
+        TASK_STATUS_SUCCESS,
+        TASK_STATUS_FAILURE,
     };
 
-    enum class CommandStatus {
-        Running,
-        Success,
-        Failure
-    };
-
-    class Command {
-    private:
-        friend class ThreadPool;
+    class Task {
+    protected:
         std::mutex mutex;
-        std::condition_variable condition;
+        std::condition_variable cv;
 
     public:
-        CommandType type;
-        CommandStatus status = CommandStatus::Running;
-        void* data = nullptr; // User data
+        TaskStatus status = TASK_STATUS_RUNNING;
+        std::function<void(void*)> func;
+        void* arg = nullptr;
+        std::exception error;
 
-        Command() = default;
+        Task(std::function<void(void*)> func, void* arg = nullptr):
+            func(std::move(func)),
+            arg(arg) {}
 
-        Command(CommandType type, void* data = nullptr):
-            type(type),
-            data(data) {}
+        void execute() {
+            mutex.lock();
+            try {
+                func(arg);
+                status = TASK_STATUS_SUCCESS;
+            } catch (const std::exception& e) {
+                status = TASK_STATUS_FAILURE;
+                error = e;
+            }
+            mutex.unlock();
+            cv.notify_all();
+        }
 
-        CommandStatus await() {
+        TaskStatus await() {
             std::unique_lock<std::mutex> lock(mutex);
-            while (status == CommandStatus::Running) {
-                condition.wait(lock);
+            while (status == TASK_STATUS_RUNNING) {
+                cv.wait(lock);
             }
             return status;
         }
     };
 
-    class CommandExecute : public Command {
-    public:
-        std::function<void(void*)> func;
-        std::exception error;
-        void* arg = nullptr;
-
-        CommandExecute(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr):
-            func(std::move(func)),
-            arg(arg) {
-            type = CommandType::Execute;
-            this->data = data;
-        }
-    };
-
-    using Task = CommandExecute;
-
     class ThreadPool {
     protected:
-        struct CommandQueue {
-            std::queue<std::shared_ptr<Command>> queue;
-            std::mutex mutex;
-            std::condition_variable condition;
-        };
+        void runner() {
+            std::unique_lock<std::mutex> lock(mutex);
+            ++thread_count;
+            for (;; cv.wait(lock)) {
+                if (!queue.empty()) {
+                    ++busy_count;
+                    std::shared_ptr<Task> task = std::move(queue.front());
+                    queue.pop();
 
-        void runner(CommandQueue* commands) {
-            for (;;) {
-                std::unique_lock<std::mutex> lock(commands->mutex);
-                while (commands->queue.empty()) {
-                    commands->condition.wait(lock);
-                }
-                std::shared_ptr<Command> command = std::move(commands->queue.front());
-                commands->queue.pop();
-                lock.unlock();
+                    lock.unlock();
+                    task->execute();
+                    lock.lock();
 
-                switch (command->type) {
-                default:
-                    throw std::runtime_error("Invalid command type");
-
-                case CommandType::Execute: {
-                    auto cmd = (CommandExecute*) command.get();
-                    try {
-                        cmd->func(cmd->arg);
-
-                        std::unique_lock<std::mutex> lock(cmd->mutex);
-                        cmd->status = CommandStatus::Success;
-                    } catch (const std::exception& e) {
-                        std::unique_lock<std::mutex> lock(cmd->mutex);
-                        cmd->status = CommandStatus::Failure;
-                        cmd->error = e;
-                    }
-
-                    cmd->condition.notify_all();
-                    break;
-                }
-
-                case CommandType::Quit:
+                    --busy_count;
+                } else if (target_thread_count < thread_count) {
+                    --thread_count;
                     return;
                 }
             }
         }
 
-        std::vector<std::pair<std::thread, CommandQueue*>> threads;
-        unsigned int sched_counter = 0;
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::queue<std::shared_ptr<Task>> queue;
+        unsigned int thread_count;
+        unsigned int target_thread_count;
+        unsigned int busy_count;
 
     public:
-        ThreadPool(unsigned int pool_size = std::thread::hardware_concurrency()) {
-            for (unsigned int i = 0; i < pool_size; ++i) {
-                auto new_queue = new CommandQueue;
-                std::thread new_thread(&ThreadPool::runner, this, new_queue);
-                threads.push_back({std::move(new_thread), new_queue});
-            }
-        };
-
-        ~ThreadPool() {
-            for (auto& thread : threads) {
-                auto cmd = std::make_shared<Command>(CommandType::Quit);
-
-                {
-                    std::unique_lock<std::mutex> lock(thread.second->mutex);
-                    thread.second->queue.push(std::move(cmd));
-                }
-                thread.second->condition.notify_one();
-            }
-
-            for (auto& thread : threads) {
-                thread.first.join();
-                delete thread.second;
-            }
-        };
-
-        std::shared_ptr<Task> schedule(std::function<void(void*)> func, void* arg = nullptr, void* data = nullptr) {
-            CommandQueue* commands = threads[sched_counter].second;
-            auto cmd = std::make_shared<CommandExecute>(std::move(func), arg, data);
-
-            {
-                std::unique_lock<std::mutex> lock(commands->mutex);
-                commands->queue.push(cmd);
-            }
-
-            commands->condition.notify_one();
-            sched_counter = (sched_counter + 1) % threads.size();
-
-            return cmd;
-        };
-
-        void resize(unsigned int new_pool_size) {
-            if (new_pool_size == threads.size()) {
-                return;
-            }
-
-            if (new_pool_size < threads.size()) {
-                for (unsigned int i = 0; i < new_pool_size; i++, sched_counter = (sched_counter + 1) % threads.size()) {
-                    auto cmd = std::make_shared<Command>(CommandType::Quit);
-
-                    {
-                        std::unique_lock<std::mutex> lock(threads[sched_counter].second->mutex);
-                        threads[sched_counter].second->queue.push(std::move(cmd));
-                    }
-                    threads[sched_counter].second->condition.notify_one();
-
-                    threads[sched_counter].first.join();
-                    delete threads[sched_counter].second;
-                }
-
-                threads.resize(new_pool_size);
-            } else {
-                for (unsigned int i = threads.size(); i < new_pool_size; ++i) {
-                    auto new_queue = new CommandQueue;
-                    std::thread new_thread(&ThreadPool::runner, this, new_queue);
-                    threads.push_back({std::move(new_thread), new_queue});
-                }
+        ThreadPool(unsigned int size = std::thread::hardware_concurrency()):
+            thread_count(0),
+            target_thread_count(size),
+            busy_count(0) {
+            for (unsigned int i = 0; i < target_thread_count; ++i) {
+                std::thread(&ThreadPool::runner, this).detach();
             }
         }
 
-        inline decltype(threads)::size_type size() const {
-            return threads.size();
+        ~ThreadPool() {
+            std::unique_lock<std::mutex> lock(mutex);
+            target_thread_count = 0;
+            lock.unlock();
+            cv.notify_all();
+            lock.lock();
+            while (thread_count) {
+                cv.wait(lock);
+            }
+        }
+
+        std::shared_ptr<Task> schedule(std::function<void(void*)> func, void* arg = nullptr, bool launch_if_busy = false) {
+            std::shared_ptr<Task> task = std::make_shared<Task>(std::move(func), arg);
+
+            if (launch_if_busy) {
+                std::unique_lock<std::mutex> lock(mutex);
+                if (busy_count >= thread_count) {
+                    lock.unlock();
+                    std::thread(&Task::execute, task).detach();
+                    return task;
+                }
+            }
+
+            mutex.lock();
+            queue.push(task);
+            mutex.unlock();
+            cv.notify_one();
+            return task;
+        };
+
+        void resize(unsigned int size) {
+            std::unique_lock<std::mutex> lock(mutex);
+            if (size < target_thread_count) {
+                target_thread_count = size;
+                lock.unlock();
+                cv.notify_all();
+            } else if (size > target_thread_count) {
+                for (unsigned int i = 0; i < size - target_thread_count; ++i) {
+                    std::thread(&ThreadPool::runner, this).detach();
+                }
+                target_thread_count = size;
+            }
+        }
+
+        unsigned int size() const {
+            return target_thread_count;
         }
     };
 } // namespace tp
