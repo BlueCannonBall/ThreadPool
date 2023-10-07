@@ -10,14 +10,14 @@ ThreadPool is a modern, header-only C++ threadpool library.
 
 int main() {
     tp::ThreadPool threadpool; // Create a threadpool
-    std::mutex mtx;
+    std::mutex mutex;
     std::vector<std::shared_ptr<tp::Task>> tasks; // Vector to store threadpool tasks
 
     for (unsigned int i = 0; i < 10; ++i) {
-        tasks.push_back(threadpool.schedule([i, &mtx](void*) {
-            mtx.lock();
+        tasks.push_back(threadpool.schedule([i, &mutex](void*) {
+            mutex.lock();
             std::cout << "Printing from task: " << i << std::endl;
-            mtx.unlock();
+            mutex.unlock();
         })); // Schedule tasks and add them to the vector
     }
 
